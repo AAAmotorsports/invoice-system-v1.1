@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>請求書・在庫管理システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+        }
+        .mono {
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .invoice-paper {
+            background: linear-gradient(to bottom, #fefefe 0%, #fafafa 100%);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .tab-active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .tab-inactive {
+            background: #f7fafc;
+            color: #4a5568;
+        }
+        .tab-inactive:hover {
+            background: #edf2f7;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .slide-in {
+            animation: slideIn 0.4s ease-out;
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('inventory');
+            const [inventory, setInventory] = useState([]);
+            const [invoiceItems, setInvoiceItems] = useState([]);
+            const [purchaseHistory, setPurchaseHistory] = useState([]);
+            const [customers, setCustomers] = useState([]);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [customerInfo, setCustomerInfo] = useState({
+                name: '',
+                invoiceDate: new Date().toISOString().split('T')[0],
+                invoiceNumber: '',
+            });
+            const [selectedCustomer, setSelectedCustomer] = useState('');
+
+            // Load data from storage
+            useEffect(() => {
+                loadInventory();
+                loadPurchaseHistory();
+                loadCustomers();
+            }, []);
+
+            // Update customers list when purchase history changes
+            useEffect(() => {
+                const uniqueCustomers = [...new Set(purchaseHistory.map(p => p.customerName))].sort();
+                setCustomers(uniqueCustomers);
+            }, [purchaseHistory]);
+
+            const loadInventory = async () => {
+                try {
+                    const result = await window.storage.get('inventory');
+                    if (result && result.value) {
+                        setInventory(JSON.parse(result.value));
+                    }
+                } catch (error) {
+                    console.log('在庫データの読み込みエラー:', error);
+                }
+            };
+
+            const saveInventory = async (newInventory) => {
+                try {
+                    await window.storage.set('inventory', JSON.stringify(newInventory));
+                } catch (error) {
+                    console.error('在庫データの保存エラー:', error);
+                }
+            };
+
+            const loadPurchaseHistory = async () => {
+                try {
+                    const result = await window.storage.get('purchase-history');
+                    if (result && result.value) {
+                        setPurchaseHistory(JSON.parse(result.value));
+                    }
+                } catch (error) {
+                    console.log('購入履歴の読み込みエラー:', error);
+                }
+            };
+
+            const savePurchaseHistory = async (newHistory) => {
+                try {
+                    await window.storage.set('purchase-history', JSON.stringify(newHistory));
+                } catch (error) {
+                    console.error('購入履歴の保存エラー:', error);
+                }
+            };
+
+            const loadCustomers = async () => {
+                try {
+                    const result = await window.storage.get('customers');
+                    if (result && result.value) {
+                        setCustomers(JSON.parse(result.value));
+                    }
+                } catch (error) {
+                    console.log('顧客データの読み込みエラー:', error);
+                }
+            };
+
+            const saveCustomers = async (newCustomers) => {
+                try {
+                    await window.storage.set('customers', JSON.stringify(newCustomers));
+                } catch (error) {
+                    console.error('顧客データの保存エラー:', error);
+                }
+            };
+
+            // Export to Freee format (CSV)
+            const exportToFreee = () => {
+                if (purchaseHistory.length === 0) {
+                    alert('エクスポートするデータがありません。');
+                    return;
+                }
+
+                // Freee用のCSV形式
+                // 日付,取引先,勘定科目,税区分,金額(税込),備考
+                let csv = '収支区分,管理番号,発生日,取引先,勘定科目,税区分,金額,税込金額,備考\n';
+                
+                purchaseHistory.forEach(purchase => {
+                    const row = [
+                        '収入', // 収支区分
+                        purchase.invoiceNumber, // 管理番号
+                        purchase.invoiceDate, // 発生日
+                        purchase.customerName, // 取引先
+                        '売上高', // 勘定科目
+                        '課税売上10%', // 税区分
+                        purchase.subtotal, // 金額（税抜）
+                        purchase.total, // 税込金額
+                        `請求書番号: ${purchase.invoiceNumber}`, // 備考
+                    ];
+                    csv += row.join(',') + '\n';
+                });
+
+                // Download CSV
+                const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `freee_export_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                alert(`✅ ${purchaseHistory.length}件のデータをエクスポートしました！`);
+            };
+
+            // Export filtered data
+            const exportFilteredToFreee = (customerName) => {
+                const filtered = purchaseHistory.filter(p => p.customerName === customerName);
+                
+                if (filtered.length === 0) {
+                    alert('エクスポートするデータがありません。');
+                    return;
+                }
+
+                let csv = '収支区分,管理番号,発生日,取引先,勘定科目,税区分,金額,税込金額,備考\n';
+                
+                filtered.forEach(purchase => {
+                    const row = [
+                        '収入',
+                        purchase.invoiceNumber,
+                        purchase.invoiceDate,
+                        purchase.customerName,
+                        '売上高',
+                        '課税売上10%',
+                        purchase.subtotal,
+                        purchase.total,
+                        `請求書番号: ${purchase.invoiceNumber}`,
+                    ];
+                    csv += row.join(',') + '\n';
+                });
+
+                const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `freee_${customerName}_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                alert(`✅ ${customerName}様の${filtered.length}件のデータをエクスポートしました！`);
+            };
+
+            // Handle delivery note image upload
+            const handleDeliveryNoteUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                    alert('画像ファイルを選択してください（JPG、PNG等）');
+                    return;
+                }
+
+                // Check file size (max 10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    alert('ファイルサイズが大きすぎます。10MB以下の画像を選択してください。');
+                    return;
+                }
+
+                setIsProcessing(true);
+                
+                try {
+                    // Convert image to base64
+                    const base64Data = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result.split(',')[1]);
+                        reader.onerror = () => reject(new Error('ファイルの読み込みに失敗しました'));
+                        reader.readAsDataURL(file);
+                    });
+
+                    // Call Claude API to extract items from delivery note
+                    const response = await fetch("https://api.anthropic.com/v1/messages", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            model: "claude-sonnet-4-20250514",
+                            max_tokens: 2000,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: [
+                                        {
+                                            type: "image",
+                                            source: {
+                                                type: "base64",
+                                                media_type: file.type,
+                                                data: base64Data
+                                            }
+                                        },
+                                        {
+                                            type: "text",
+                                            text: `この画像は納品書です。商品情報を抽出してください。
+
+重要: 必ず以下のJSON形式のみを返してください。説明文や前置きは一切不要です。
+
+{
+  "items": [
+    {
+      "name": "商品名",
+      "quantity": 数量,
+      "unitPrice": 単価
+    }
+  ]
+}
+
+- nameは商品の名称（文字列）
+- quantityは数量（数値）
+- unitPriceは単価（数値）
+- 必ず有効なJSON形式で返してください
+- 複数の商品がある場合はすべて抽出してください`
+                                        }
+                                    ]
+                                }
+                            ],
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API呼び出しエラー: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    if (!data.content || data.content.length === 0) {
+                        throw new Error('APIからの応答が空です');
+                    }
+
+                    const textContent = data.content
+                        .filter(c => c.type === "text")
+                        .map(c => c.text)
+                        .join("");
+                    
+                    if (!textContent) {
+                        throw new Error('テキストコンテンツが見つかりません');
+                    }
+
+                    console.log('AI応答:', textContent);
+                    
+                    // Extract JSON from response (handle markdown code blocks)
+                    let jsonText = textContent.trim();
+                    
+                    // Remove markdown code blocks if present
+                    jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+                    
+                    // Try to find JSON object
+                    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+                    if (!jsonMatch) {
+                        throw new Error('JSON形式のデータが見つかりませんでした。画像が不鮮明な可能性があります。');
+                    }
+
+                    const extractedData = JSON.parse(jsonMatch[0]);
+                    
+                    if (!extractedData.items || !Array.isArray(extractedData.items)) {
+                        throw new Error('商品データの形式が正しくありません');
+                    }
+
+                    if (extractedData.items.length === 0) {
+                        alert('納品書から商品情報を抽出できませんでした。手動で入力してください。');
+                        return;
+                    }
+
+                    const newItems = extractedData.items;
+                    
+                    // Validate items
+                    for (const item of newItems) {
+                        if (!item.name || typeof item.quantity !== 'number' || typeof item.unitPrice !== 'number') {
+                            throw new Error('商品データの形式が正しくありません');
+                        }
+                    }
+                    
+                    // Add to inventory
+                    const updatedInventory = [...inventory];
+                    newItems.forEach(item => {
+                        const existingIndex = updatedInventory.findIndex(
+                            inv => inv.name === item.name
+                        );
+                        
+                        if (existingIndex >= 0) {
+                            updatedInventory[existingIndex].quantity += item.quantity;
+                        } else {
+                            updatedInventory.push({
+                                id: Date.now() + Math.random(),
+                                name: item.name,
+                                quantity: item.quantity,
+                                unitPrice: item.unitPrice
+                            });
+                        }
+                    });
+                    
+                    setInventory(updatedInventory);
+                    await saveInventory(updatedInventory);
+                    alert(`✅ ${newItems.length}件の商品を在庫に追加しました！\n\n${newItems.map(i => `・${i.name}: ${i.quantity}個`).join('\n')}`);
+                    
+                } catch (error) {
+                    console.error('納品書の処理エラー:', error);
+                    alert(`❌ 納品書の読み取りに失敗しました。\n\n原因: ${error.message}\n\n対処法:\n・画像が鮮明か確認してください\n・照明が良好か確認してください\n・納品書全体が写っているか確認してください\n・または手動で入力してください`);
+                } finally {
+                    setIsProcessing(false);
+                    // Reset file input
+                    e.target.value = '';
+                }
+            };
+
+            // Add item to inventory manually
+            const addInventoryItem = (item) => {
+                const newInventory = [...inventory, { ...item, id: Date.now() }];
+                setInventory(newInventory);
+                saveInventory(newInventory);
+            };
+
+            // Update inventory quantity
+            const updateInventoryQuantity = (id, newQuantity) => {
+                const newInventory = inventory.map(item =>
+                    item.id === id ? { ...item, quantity: newQuantity } : item
+                );
+                setInventory(newInventory);
+                saveInventory(newInventory);
+            };
+
+            // Delete inventory item
+            const deleteInventoryItem = (id) => {
+                const newInventory = inventory.filter(item => item.id !== id);
+                setInventory(newInventory);
+                saveInventory(newInventory);
+            };
+
+            // Add item to invoice
+            const addToInvoice = (item, quantity) => {
+                const invoiceItem = {
+                    id: Date.now(),
+                    name: item.name,
+                    quantity: quantity,
+                    unitPrice: item.unitPrice,
+                    total: quantity * item.unitPrice
+                };
+                setInvoiceItems([...invoiceItems, invoiceItem]);
+            };
+
+            // Remove item from invoice
+            const removeFromInvoice = (id) => {
+                setInvoiceItems(invoiceItems.filter(item => item.id !== id));
+            };
+
+            // Generate invoice PDF
+            const generateInvoicePDF = async () => {
+                if (!customerInfo.name) {
+                    alert('顧客名を入力してください');
+                    return;
+                }
+                if (invoiceItems.length === 0) {
+                    alert('請求明細を追加してください');
+                    return;
+                }
+
+                const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
+                const tax = Math.floor(subtotal * 0.1);
+                const total = subtotal + tax;
+
+                // Create purchase record
+                const newPurchase = {
+                    id: Date.now(),
+                    customerName: customerInfo.name,
+                    invoiceDate: customerInfo.invoiceDate,
+                    invoiceNumber: customerInfo.invoiceNumber || `INV-${Date.now()}`,
+                    items: invoiceItems,
+                    subtotal: subtotal,
+                    tax: tax,
+                    total: total,
+                };
+
+                try {
+                    // Call Claude API to generate PDF
+                    setIsProcessing(true);
+                    
+                    const response = await fetch("https://api.anthropic.com/v1/messages", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({
+                            model: "claude-sonnet-4-20250514",
+                            max_tokens: 1000,
+                            messages: [
+                                {
+                                    role: "user",
+                                    content: `以下の請求書データからPDFを生成してください。
+
+顧客名: ${newPurchase.customerName}
+請求日: ${newPurchase.invoiceDate}
+請求書番号: ${newPurchase.invoiceNumber}
+
+請求明細:
+${newPurchase.items.map(item => `${item.name}: ${item.quantity}個 × ¥${item.unitPrice.toLocaleString()} = ¥${item.total.toLocaleString()}`).join('\n')}
+
+小計: ¥${subtotal.toLocaleString()}
+消費税(10%): ¥${tax.toLocaleString()}
+合計: ¥${total.toLocaleString()}
+
+発行元:
+福岡キッズカートアカデミー
+原野正明
+818-0024
+福岡県筑紫野市大字原田1338
+
+ReportLabを使用して、アップロードされたサンプル請求書と同じフォーマットで日本語のPDFを生成してください。`
+                                }
+                            ],
+                        })
+                    });
+
+                    if (response.ok) {
+                        alert('✅ PDFの生成をリクエストしました。\nClaude.aiでは直接PDF生成ができないため、このチャットで「請求書PDFを生成してください」とメッセージを送ってください。');
+                    }
+                } catch (error) {
+                    console.error('PDF生成エラー:', error);
+                } finally {
+                    setIsProcessing(false);
+                }
+
+                // Update inventory
+                const updatedInventory = [...inventory];
+                invoiceItems.forEach(invoiceItem => {
+                    const invIndex = updatedInventory.findIndex(inv => inv.name === invoiceItem.name);
+                    if (invIndex >= 0) {
+                        updatedInventory[invIndex].quantity -= invoiceItem.quantity;
+                        if (updatedInventory[invIndex].quantity < 0) {
+                            updatedInventory[invIndex].quantity = 0;
+                        }
+                    }
+                });
+                setInventory(updatedInventory);
+                saveInventory(updatedInventory);
+
+                // Save to purchase history
+                const updatedHistory = [newPurchase, ...purchaseHistory];
+                setPurchaseHistory(updatedHistory);
+                savePurchaseHistory(updatedHistory);
+
+                alert(`✅ 請求書を生成しました\n\n顧客: ${customerInfo.name}\n請求書番号: ${newPurchase.invoiceNumber}\n小計: ¥${subtotal.toLocaleString()}\n消費税: ¥${tax.toLocaleString()}\n合計: ¥${total.toLocaleString()}\n\n在庫を更新し、購入履歴に保存しました。\n\nPDFを生成するには、このチャットで請求書データをお知らせください。`);
+                
+                // Clear invoice items and reset form
+                setInvoiceItems([]);
+                setCustomerInfo({
+                    name: '',
+                    invoiceDate: new Date().toISOString().split('T')[0],
+                    invoiceNumber: '',
+                });
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto p-6">
+                    <div className="mb-8 slide-in">
+                        <h1 className="text-4xl font-bold gradient-text mb-2">請求書・在庫管理システム</h1>
+                        <p className="text-slate-600">福岡キッズカートアカデミー</p>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="flex gap-2 mb-6 slide-in" style={{animationDelay: '0.1s'}}>
+                        <button
+                            onClick={() => setActiveTab('inventory')}
+                            className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                activeTab === 'inventory' ? 'tab-active' : 'tab-inactive'
+                            }`}
+                        >
+                            📦 在庫管理
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('invoice')}
+                            className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                activeTab === 'invoice' ? 'tab-active' : 'tab-inactive'
+                            }`}
+                        >
+                            📄 請求書作成
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('history')}
+                            className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                activeTab === 'history' ? 'tab-active' : 'tab-inactive'
+                            }`}
+                        >
+                            📊 購入履歴
+                        </button>
+                    </div>
+
+                    {/* Inventory Management Tab */}
+                    {activeTab === 'inventory' && (
+                        <div className="space-y-6 slide-in">
+                            {/* Bulk Import */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">⚡ データ一括インポート</h2>
+                                <BulkImportForm onImport={(items) => {
+                                    const updatedInventory = [...inventory];
+                                    items.forEach(item => {
+                                        const existingIndex = updatedInventory.findIndex(
+                                            inv => inv.name === item.name
+                                        );
+                                        if (existingIndex >= 0) {
+                                            updatedInventory[existingIndex].quantity += item.quantity;
+                                        } else {
+                                            updatedInventory.push({
+                                                id: Date.now() + Math.random(),
+                                                name: item.name,
+                                                quantity: item.quantity,
+                                                unitPrice: item.unitPrice
+                                            });
+                                        }
+                                    });
+                                    setInventory(updatedInventory);
+                                    saveInventory(updatedInventory);
+                                }} />
+                            </div>
+
+                            {/* Manual Add */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">➕ 手動で在庫追加</h2>
+                                <ManualAddForm onAdd={addInventoryItem} />
+                            </div>
+
+                            {/* Inventory List */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">📊 在庫一覧</h2>
+                                {inventory.length === 0 ? (
+                                    <p className="text-slate-500 text-center py-8">
+                                        在庫がありません。納品書をアップロードするか、手動で追加してください。
+                                    </p>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full">
+                                            <thead className="bg-slate-100">
+                                                <tr>
+                                                    <th className="px-4 py-3 text-left font-semibold">品名</th>
+                                                    <th className="px-4 py-3 text-right font-semibold">数量</th>
+                                                    <th className="px-4 py-3 text-right font-semibold">単価</th>
+                                                    <th className="px-4 py-3 text-center font-semibold">操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {inventory.map((item, index) => (
+                                                    <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                        <td className="px-4 py-3">{item.name}</td>
+                                                        <td className="px-4 py-3 text-right mono">{item.quantity}</td>
+                                                        <td className="px-4 py-3 text-right mono">¥{item.unitPrice.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center">
+                                                            <button
+                                                                onClick={() => deleteInventoryItem(item.id)}
+                                                                className="text-red-600 hover:text-red-800 font-semibold"
+                                                            >
+                                                                削除
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Invoice Creation Tab */}
+                    {activeTab === 'invoice' && (
+                        <div className="space-y-6 slide-in">
+                            {/* Customer Info */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">👤 顧客情報</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">顧客名</label>
+                                        <div className="space-y-2">
+                                            <select
+                                                value={customerInfo.name}
+                                                onChange={(e) => setCustomerInfo({...customerInfo, name: e.target.value})}
+                                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                            >
+                                                <option value="">-- 顧客を選択または新規入力 --</option>
+                                                {customers.map(customer => (
+                                                    <option key={customer} value={customer}>{customer}</option>
+                                                ))}
+                                            </select>
+                                            <input
+                                                type="text"
+                                                value={customerInfo.name}
+                                                onChange={(e) => setCustomerInfo({...customerInfo, name: e.target.value})}
+                                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                                placeholder="または新規顧客名を入力"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">請求日</label>
+                                        <input
+                                            type="date"
+                                            value={customerInfo.invoiceDate}
+                                            onChange={(e) => setCustomerInfo({...customerInfo, invoiceDate: e.target.value})}
+                                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold mb-2">請求書番号</label>
+                                        <input
+                                            type="text"
+                                            value={customerInfo.invoiceNumber}
+                                            onChange={(e) => setCustomerInfo({...customerInfo, invoiceNumber: e.target.value})}
+                                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                            placeholder="例: 20260211006"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Add Items from Inventory */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">📦 在庫から追加</h2>
+                                {inventory.length === 0 ? (
+                                    <p className="text-slate-500 text-center py-4">
+                                        在庫がありません。先に在庫管理タブで商品を追加してください。
+                                    </p>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {inventory.map(item => (
+                                            <InventoryCard
+                                                key={item.id}
+                                                item={item}
+                                                onAddToInvoice={addToInvoice}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Invoice Items */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">📋 請求明細</h2>
+                                {invoiceItems.length === 0 ? (
+                                    <p className="text-slate-500 text-center py-8">
+                                        請求明細がありません。在庫から商品を追加してください。
+                                    </p>
+                                ) : (
+                                    <>
+                                        <div className="overflow-x-auto mb-6">
+                                            <table className="w-full">
+                                                <thead className="bg-slate-100">
+                                                    <tr>
+                                                        <th className="px-4 py-3 text-left font-semibold">摘要</th>
+                                                        <th className="px-4 py-3 text-right font-semibold">数量</th>
+                                                        <th className="px-4 py-3 text-right font-semibold">単価</th>
+                                                        <th className="px-4 py-3 text-right font-semibold">金額</th>
+                                                        <th className="px-4 py-3 text-center font-semibold">操作</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {invoiceItems.map((item, index) => (
+                                                        <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                                                            <td className="px-4 py-3">{item.name}</td>
+                                                            <td className="px-4 py-3 text-right mono">{item.quantity}</td>
+                                                            <td className="px-4 py-3 text-right mono">¥{item.unitPrice.toLocaleString()}</td>
+                                                            <td className="px-4 py-3 text-right mono font-semibold">¥{item.total.toLocaleString()}</td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <button
+                                                                    onClick={() => removeFromInvoice(item.id)}
+                                                                    className="text-red-600 hover:text-red-800 font-semibold"
+                                                                >
+                                                                    削除
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+
+                                        {/* Totals */}
+                                        <div className="border-t-2 border-slate-200 pt-4">
+                                            <div className="flex justify-end space-y-2">
+                                                <div className="w-64">
+                                                    <div className="flex justify-between py-2">
+                                                        <span className="font-semibold">小計:</span>
+                                                        <span className="mono font-semibold">
+                                                            ¥{invoiceItems.reduce((sum, item) => sum + item.total, 0).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between py-2">
+                                                        <span className="font-semibold">消費税(10%):</span>
+                                                        <span className="mono font-semibold">
+                                                            ¥{Math.floor(invoiceItems.reduce((sum, item) => sum + item.total, 0) * 0.1).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex justify-between py-2 border-t-2 border-slate-300 text-lg">
+                                                        <span className="font-bold">合計:</span>
+                                                        <span className="mono font-bold text-purple-600">
+                                                            ¥{(invoiceItems.reduce((sum, item) => sum + item.total, 0) + Math.floor(invoiceItems.reduce((sum, item) => sum + item.total, 0) * 0.1)).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Generate Invoice Button */}
+                                        <div className="mt-6 text-center">
+                                            <button
+                                                onClick={generateInvoicePDF}
+                                                className="px-8 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold rounded-lg hover:from-purple-700 hover:to-indigo-700 transform hover:scale-105 transition-all shadow-lg"
+                                            >
+                                                📄 請求書を生成して在庫を更新
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Purchase History Tab */}
+                    {activeTab === 'history' && (
+                        <div className="space-y-6 slide-in">
+                            {/* Export to Freee */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">💾 会計ソフトへエクスポート</h2>
+                                <div className="flex gap-4 flex-wrap">
+                                    <button
+                                        onClick={exportToFreee}
+                                        disabled={purchaseHistory.length === 0}
+                                        className={`px-6 py-3 rounded-lg font-semibold transition-all ${
+                                            purchaseHistory.length > 0
+                                                ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700 shadow-md'
+                                                : 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                        }`}
+                                    >
+                                        📊 全データをFreee形式でエクスポート
+                                    </button>
+                                    {selectedCustomer && (
+                                        <button
+                                            onClick={() => exportFilteredToFreee(selectedCustomer)}
+                                            className="px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-cyan-700 transition-all shadow-md"
+                                        >
+                                            📊 {selectedCustomer}様のデータをエクスポート
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-sm text-slate-600 mt-3">
+                                    💡 エクスポートしたCSVファイルはFreee、MFクラウド、弥生会計などの会計ソフトにインポートできます。
+                                </p>
+                            </div>
+
+                            {/* Customer Filter */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">🔍 顧客でフィルター</h2>
+                                <select
+                                    value={selectedCustomer}
+                                    onChange={(e) => setSelectedCustomer(e.target.value)}
+                                    className="w-full md:w-96 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                >
+                                    <option value="">すべての顧客</option>
+                                    {[...new Set(purchaseHistory.map(p => p.customerName))].map(name => (
+                                        <option key={name} value={name}>{name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Purchase History List */}
+                            <div className="invoice-paper rounded-xl p-6">
+                                <h2 className="text-2xl font-bold mb-4">📜 購入履歴</h2>
+                                {purchaseHistory.length === 0 ? (
+                                    <p className="text-slate-500 text-center py-8">
+                                        購入履歴がありません。請求書を作成すると自動的に記録されます。
+                                    </p>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {purchaseHistory
+                                            .filter(p => !selectedCustomer || p.customerName === selectedCustomer)
+                                            .map((purchase) => (
+                                                <PurchaseHistoryCard key={purchase.id} purchase={purchase} />
+                                            ))}
+                                        {purchaseHistory.filter(p => !selectedCustomer || p.customerName === selectedCustomer).length === 0 && (
+                                            <p className="text-slate-500 text-center py-4">
+                                                該当する購入履歴がありません。
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Customer Summary */}
+                            {selectedCustomer && (
+                                <div className="invoice-paper rounded-xl p-6">
+                                    <h2 className="text-2xl font-bold mb-4">📈 {selectedCustomer}様の購入サマリー</h2>
+                                    <CustomerSummary 
+                                        customerName={selectedCustomer} 
+                                        history={purchaseHistory.filter(p => p.customerName === selectedCustomer)} 
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Purchase History Card Component
+        function PurchaseHistoryCard({ purchase }) {
+            const [isExpanded, setIsExpanded] = useState(false);
+
+            const generatePDFFromHistory = () => {
+                const message = `この請求書のPDFを生成してください：
+
+顧客名: ${purchase.customerName}
+請求日: ${purchase.invoiceDate}
+請求書番号: ${purchase.invoiceNumber}
+
+請求明細:
+${purchase.items.map(item => `${item.name}: ${item.quantity}個 × ¥${item.unitPrice.toLocaleString()} = ¥${item.total.toLocaleString()}`).join('\n')}
+
+小計: ¥${purchase.subtotal.toLocaleString()}
+消費税(10%): ¥${purchase.tax.toLocaleString()}
+合計: ¥${purchase.total.toLocaleString()}`;
+
+                // Copy to clipboard
+                navigator.clipboard.writeText(message).then(() => {
+                    alert('📋 請求書データをクリップボードにコピーしました！\n\nこのチャットに貼り付けて送信してください。PDFを生成します。');
+                });
+            };
+
+            return (
+                <div className="border border-slate-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                    <div 
+                        className="p-4 cursor-pointer bg-white hover:bg-slate-50 transition-colors"
+                        onClick={() => setIsExpanded(!isExpanded)}
+                    >
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h3 className="font-bold text-lg">{purchase.customerName}</h3>
+                                <p className="text-sm text-slate-600">請求日: {purchase.invoiceDate}</p>
+                                <p className="text-sm text-slate-600">請求書番号: {purchase.invoiceNumber}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-2xl font-bold text-purple-600 mono">
+                                    ¥{purchase.total.toLocaleString()}
+                                </p>
+                                <p className="text-sm text-slate-500">{purchase.items.length}品目</p>
+                            </div>
+                        </div>
+                        <div className="mt-2 text-sm text-purple-600 font-semibold">
+                            {isExpanded ? '▲ 閉じる' : '▼ 詳細を表示'}
+                        </div>
+                    </div>
+                    
+                    {isExpanded && (
+                        <div className="border-t border-slate-200 bg-slate-50 p-4">
+                            <div className="mb-4">
+                                <button
+                                    onClick={generatePDFFromHistory}
+                                    className="px-4 py-2 bg-gradient-to-r from-red-600 to-pink-600 text-white font-semibold rounded-lg hover:from-red-700 hover:to-pink-700 transition-all shadow-md"
+                                >
+                                    📄 この請求書のPDFを生成
+                                </button>
+                            </div>
+                            
+                            <h4 className="font-semibold mb-2">購入明細:</h4>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-slate-100">
+                                        <tr>
+                                            <th className="px-3 py-2 text-left">品名</th>
+                                            <th className="px-3 py-2 text-right">数量</th>
+                                            <th className="px-3 py-2 text-right">単価</th>
+                                            <th className="px-3 py-2 text-right">金額</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white">
+                                        {purchase.items.map((item, idx) => (
+                                            <tr key={idx} className={idx % 2 === 0 ? '' : 'bg-slate-50'}>
+                                                <td className="px-3 py-2">{item.name}</td>
+                                                <td className="px-3 py-2 text-right mono">{item.quantity}</td>
+                                                <td className="px-3 py-2 text-right mono">¥{item.unitPrice.toLocaleString()}</td>
+                                                <td className="px-3 py-2 text-right mono">¥{item.total.toLocaleString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="mt-4 border-t border-slate-200 pt-3 space-y-1 text-sm">
+                                <div className="flex justify-between">
+                                    <span>小計:</span>
+                                    <span className="mono font-semibold">¥{purchase.subtotal.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>消費税(10%):</span>
+                                    <span className="mono font-semibold">¥{purchase.tax.toLocaleString()}</span>
+                                </div>
+                                <div className="flex justify-between text-base font-bold border-t border-slate-300 pt-2 mt-2">
+                                    <span>合計:</span>
+                                    <span className="mono text-purple-600">¥{purchase.total.toLocaleString()}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Customer Summary Component
+        function CustomerSummary({ customerName, history }) {
+            const totalPurchases = history.length;
+            const totalAmount = history.reduce((sum, p) => sum + p.total, 0);
+            const avgPurchase = totalPurchases > 0 ? Math.floor(totalAmount / totalPurchases) : 0;
+
+            // Get most purchased items
+            const itemCounts = {};
+            history.forEach(purchase => {
+                purchase.items.forEach(item => {
+                    if (itemCounts[item.name]) {
+                        itemCounts[item.name] += item.quantity;
+                    } else {
+                        itemCounts[item.name] = item.quantity;
+                    }
+                });
+            });
+
+            const topItems = Object.entries(itemCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-gradient-to-br from-purple-100 to-indigo-100 rounded-lg p-4">
+                            <div className="text-sm text-slate-600 mb-1">総購入回数</div>
+                            <div className="text-3xl font-bold text-purple-700">{totalPurchases}回</div>
+                        </div>
+                        <div className="bg-gradient-to-br from-blue-100 to-cyan-100 rounded-lg p-4">
+                            <div className="text-sm text-slate-600 mb-1">総購入金額</div>
+                            <div className="text-3xl font-bold text-blue-700 mono">¥{totalAmount.toLocaleString()}</div>
+                        </div>
+                        <div className="bg-gradient-to-br from-green-100 to-emerald-100 rounded-lg p-4">
+                            <div className="text-sm text-slate-600 mb-1">平均購入金額</div>
+                            <div className="text-3xl font-bold text-green-700 mono">¥{avgPurchase.toLocaleString()}</div>
+                        </div>
+                    </div>
+
+                    {topItems.length > 0 && (
+                        <div className="bg-slate-50 rounded-lg p-4">
+                            <h3 className="font-semibold mb-3">よく購入される商品 TOP5</h3>
+                            <div className="space-y-2">
+                                {topItems.map(([name, count], index) => (
+                                    <div key={name} className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-sm">
+                                            {index + 1}
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="font-medium">{name}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-bold text-purple-600">{count}個</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Bulk Import Form Component
+        function BulkImportForm({ onImport }) {
+            const [jsonData, setJsonData] = useState('');
+            const [isValid, setIsValid] = useState(true);
+            const [previewItems, setPreviewItems] = useState([]);
+
+            const exampleData = {
+                items: [
+                    { name: "ALFANO (6) 水温センサM10", quantity: 2, unitPrice: 10400 },
+                    { name: "ALFANO (6) 水温延長ケーブル", quantity: 2, unitPrice: 2560 }
+                ]
+            };
+
+            const handleJsonChange = (e) => {
+                const value = e.target.value;
+                setJsonData(value);
+                
+                try {
+                    if (value.trim()) {
+                        const parsed = JSON.parse(value);
+                        if (parsed.items && Array.isArray(parsed.items)) {
+                            setIsValid(true);
+                            setPreviewItems(parsed.items);
+                        } else {
+                            setIsValid(false);
+                            setPreviewItems([]);
+                        }
+                    } else {
+                        setIsValid(true);
+                        setPreviewItems([]);
+                    }
+                } catch (error) {
+                    setIsValid(false);
+                    setPreviewItems([]);
+                }
+            };
+
+            const handleImport = () => {
+                if (isValid && previewItems.length > 0) {
+                    onImport(previewItems);
+                    alert(`✅ ${previewItems.length}件の商品を在庫に追加しました！`);
+                    setJsonData('');
+                    setPreviewItems([]);
+                }
+            };
+
+            const useExample = () => {
+                setJsonData(JSON.stringify(exampleData, null, 2));
+                setIsValid(true);
+                setPreviewItems(exampleData.items);
+            };
+
+            return (
+                <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-l-4 border-purple-500 p-4 rounded">
+                        <h3 className="font-bold text-purple-900 mb-2">📸 使い方：</h3>
+                        <ol className="text-sm text-purple-800 space-y-1 ml-4 list-decimal">
+                            <li>納品書の写真を私（Claude）にアップロード</li>
+                            <li>私が商品データを抽出してJSON形式で返します</li>
+                            <li>そのデータを下のテキストエリアにコピペ</li>
+                            <li>「インポート」ボタンをクリック！</li>
+                        </ol>
+                        <button
+                            onClick={useExample}
+                            className="mt-3 text-sm text-purple-600 hover:text-purple-800 font-semibold underline"
+                        >
+                            サンプルデータを使ってみる
+                        </button>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-semibold mb-2">JSONデータ:</label>
+                        <textarea
+                            value={jsonData}
+                            onChange={handleJsonChange}
+                            placeholder={JSON.stringify(exampleData, null, 2)}
+                            className={`w-full h-48 px-4 py-3 border-2 rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 ${
+                                !isValid ? 'border-red-500 bg-red-50' : 'border-slate-300'
+                            }`}
+                        />
+                        {!isValid && jsonData && (
+                            <p className="text-red-600 text-sm mt-2">❌ JSON形式が正しくありません</p>
+                        )}
+                    </div>
+
+                    {previewItems.length > 0 && (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <h3 className="font-semibold text-green-900 mb-2">✅ プレビュー ({previewItems.length}件):</h3>
+                            <div className="space-y-2">
+                                {previewItems.map((item, index) => (
+                                    <div key={index} className="flex justify-between text-sm bg-white rounded p-2">
+                                        <span className="font-medium">{item.name}</span>
+                                        <span className="text-slate-600">
+                                            {item.quantity}個 × ¥{item.unitPrice.toLocaleString()}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <button
+                        onClick={handleImport}
+                        disabled={!isValid || previewItems.length === 0}
+                        className={`w-full px-6 py-3 font-bold rounded-lg transition-all ${
+                            isValid && previewItems.length > 0
+                                ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700 transform hover:scale-105 shadow-lg'
+                                : 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                        }`}
+                    >
+                        ⚡ インポート ({previewItems.length}件)
+                    </button>
+                </div>
+            );
+        }
+
+        // Manual Add Form Component
+        function ManualAddForm({ onAdd }) {
+            const [name, setName] = useState('');
+            const [quantity, setQuantity] = useState('');
+            const [unitPrice, setUnitPrice] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (name && quantity && unitPrice) {
+                    onAdd({
+                        name,
+                        quantity: parseInt(quantity),
+                        unitPrice: parseInt(unitPrice)
+                    });
+                    setName('');
+                    setQuantity('');
+                    setUnitPrice('');
+                }
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="品名"
+                        className="px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        required
+                    />
+                    <input
+                        type="number"
+                        value={quantity}
+                        onChange={(e) => setQuantity(e.target.value)}
+                        placeholder="数量"
+                        className="px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        required
+                    />
+                    <input
+                        type="number"
+                        value={unitPrice}
+                        onChange={(e) => setUnitPrice(e.target.value)}
+                        placeholder="単価"
+                        className="px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        required
+                    />
+                    <button
+                        type="submit"
+                        className="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all"
+                    >
+                        追加
+                    </button>
+                </form>
+            );
+        }
+
+        // Inventory Card Component
+        function InventoryCard({ item, onAddToInvoice }) {
+            const [quantity, setQuantity] = useState(1);
+
+            const handleAdd = () => {
+                if (quantity > 0 && quantity <= item.quantity) {
+                    onAddToInvoice(item, quantity);
+                    setQuantity(1);
+                } else {
+                    alert('数量が無効です。在庫数を確認してください。');
+                }
+            };
+
+            return (
+                <div className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <h3 className="font-bold text-lg mb-2">{item.name}</h3>
+                    <p className="text-sm text-slate-600 mb-2">在庫: {item.quantity}個</p>
+                    <p className="text-sm text-slate-600 mb-3">単価: ¥{item.unitPrice.toLocaleString()}</p>
+                    <div className="flex gap-2">
+                        <input
+                            type="number"
+                            min="1"
+                            max={item.quantity}
+                            value={quantity}
+                            onChange={(e) => setQuantity(parseInt(e.target.value))}
+                            className="w-20 px-2 py-1 border border-slate-300 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                        />
+                        <button
+                            onClick={handleAdd}
+                            className="flex-1 px-4 py-1 bg-purple-600 text-white text-sm font-semibold rounded hover:bg-purple-700 transition-colors"
+                        >
+                            追加
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</body>
+</html>
