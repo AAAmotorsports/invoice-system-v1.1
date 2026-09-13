@@ -4,12 +4,12 @@
 
 // ---- Data Store ----
 const STORAGE_KEYS = {
-  inventory: 'invoice_sys_inventory',
-  invoices: 'invoice_sys_invoices',
-  settings: 'invoice_sys_settings',
-  customers: 'invoice_sys_customers',
-  purchases: 'invoice_sys_purchases',
-  expenses: 'invoice_sys_expenses'
+  inventory: 'demo_invoice_sys_inventory',
+  invoices: 'demo_invoice_sys_invoices',
+  settings: 'demo_invoice_sys_settings',
+  customers: 'demo_invoice_sys_customers',
+  purchases: 'demo_invoice_sys_purchases',
+  expenses: 'demo_invoice_sys_expenses'
 };
 
 const DEFAULT_SETTINGS = {
